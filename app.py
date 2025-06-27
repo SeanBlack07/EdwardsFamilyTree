@@ -19,30 +19,28 @@ if uploaded_file:
     all_people = set()
     family_map = {}
 
-    # Extract the first sheet to determine the original children
+    # Get first sheet to define original children
     first_sheet = next(iter(df_dict.values()))
     original_children = []
-    for i, row in first_sheet.iterrows():
+    for _, row in first_sheet.iterrows():
         child = str(row[0]).strip()
         if pd.notna(child) and child.lower() not in ["note", "", "none"]:
             original_children.append(child)
             G.add_node(child)
             G.add_edge(root_name, child)
-            family_map[child] = child  # Key for sidebar filtering
+            family_map[child] = child
 
-    # Process all sheets
+    # Build graph from all sheets
     for sheet_name, df in df_dict.items():
         branch_name = sheet_name.strip()
         previous_person = None
 
-        for i, row in df.iterrows():
+        for _, row in df.iterrows():
             person = str(row[0]).strip()
             if pd.isna(person) or person.lower() in ["note", "", "none"]:
                 continue
 
-            all_people.add(person)
-            if person not in G:
-                G.add_node(person)
+            G.add_node(person)
             if previous_person:
                 G.add_edge(previous_person, person)
             elif branch_name in original_children:
@@ -53,30 +51,32 @@ if uploaded_file:
     st.sidebar.title("Filter")
     selected_branch = st.sidebar.selectbox("Select a branch to view", options=["All"] + original_children)
 
-    # Filter nodes based on the selected branch
+    # Filter logic
     nodes_to_display = set()
     edges_to_display = []
+
+    def dfs_add(node):
+        if node in nodes_to_display:
+            return
+        nodes_to_display.add(node)
+        for child in G.successors(node):
+            edges_to_display.append((node, child))
+            dfs_add(child)
 
     if selected_branch == "All":
         nodes_to_display = set(G.nodes)
         edges_to_display = list(G.edges)
     else:
-        def dfs_add(node):
-            if node in nodes_to_display:
-                return
-            nodes_to_display.add(node)
-            for child in G.successors(node):
-                edges_to_display.append((node, child))
-                dfs_add(child)
-
-        nodes_to_display.add(root_name)
-        nodes_to_display.add(selected_branch)
-        edges_to_display.append((root_name, selected_branch))
-        dfs_add(selected_branch)
+        if selected_branch in G:
+            nodes_to_display.add(root_name)
+            nodes_to_display.add(selected_branch)
+            edges_to_display.append((root_name, selected_branch))
+            dfs_add(selected_branch)
 
     subgraph = G.subgraph(nodes_to_display)
 
-    def hierarchy_pos(G, root=None, width=1., vert_gap=0.2, vert_loc=0, xcenter=0.5, pos=None, parent=None):
+    # Hierarchical layout
+    def hierarchy_pos(G, root, width=1., vert_gap=0.3, vert_loc=0, xcenter=0.5, pos=None, parent=None):
         if pos is None:
             pos = {root: (xcenter, vert_loc)}
         else:
@@ -90,12 +90,18 @@ if uploaded_file:
         for child in children:
             nextx += dx
             if child not in pos:
-                pos = hierarchy_pos(G, root=child, width=dx, vert_gap=vert_gap,
+                pos = hierarchy_pos(G, child, width=dx, vert_gap=vert_gap,
                                     vert_loc=vert_loc - vert_gap, xcenter=nextx, pos=pos, parent=root)
         return pos
 
-    pos = hierarchy_pos(subgraph, root=root_name)
-    plt.figure(figsize=(20, 12))
-    nx.draw(subgraph, pos, with_labels=True, node_size=3000, node_color="#d9f0f7",
-            font_size=9, font_weight="bold", edge_color="#777")
-    st.pyplot(plt.gcf())
+    if root_name in subgraph:
+        try:
+            pos = hierarchy_pos(subgraph, root=root_name)
+            plt.figure(figsize=(20, 12))
+            nx.draw(subgraph, pos, with_labels=True, node_size=3000, node_color="#d9f0f7",
+                    font_size=9, font_weight="bold", edge_color="#777")
+            st.pyplot(plt.gcf())
+        except Exception as e:
+            st.error(f"Error rendering tree layout: {e}")
+    else:
+        st.warning(f"The root '{root_name}' is not present in this branch.")
