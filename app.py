@@ -61,12 +61,16 @@ if uploaded_file:
         nodes_to_display = set(G.nodes)
         edges_to_display = list(G.edges)
     else:
+        def dfs_add(node):
+            nodes_to_display.add(node)
+            for child in G.successors(node):
+                edges_to_display.append((node, child))
+                dfs_add(child)
+
         nodes_to_display.add(root_name)
         nodes_to_display.add(selected_branch)
-        for node in G.nodes:
-            if family_map.get(node) == selected_branch:
-                nodes_to_display.add(node)
-        edges_to_display = [(u, v) for u, v in G.edges if u in nodes_to_display and v in nodes_to_display]
+        edges_to_display.append((root_name, selected_branch))
+        dfs_add(selected_branch)
 
     subgraph = G.subgraph(nodes_to_display)
 
@@ -76,16 +80,19 @@ if uploaded_file:
         else:
             pos[root] = (xcenter, vert_loc)
         children = list(G.successors(root))
-        if len(children) != 0:
-            dx = width / len(children)
-            nextx = xcenter - width/2 - dx/2
-            for child in children:
-                nextx += dx
-                pos = hierarchy_pos(G, root=child, width=dx, vert_gap=vert_gap,
-                                    vert_loc=vert_loc - vert_gap, xcenter=nextx, pos=pos, parent=root)
+        if not children:
+            return pos
+
+        dx = width / len(children)
+        nextx = xcenter - width / 2 - dx / 2
+        for child in children:
+            nextx += dx
+            pos = hierarchy_pos(G, root=child, width=dx, vert_gap=vert_gap,
+                                vert_loc=vert_loc - vert_gap, xcenter=nextx, pos=pos, parent=root)
         return pos
 
     pos = hierarchy_pos(subgraph, root=root_name)
     plt.figure(figsize=(20, 12))
-    nx.draw(subgraph, pos, with_labels=True, node_size=3000, node_color="#d9f0f7", font_size=9, font_weight="bold", edge_color="#777")
+    nx.draw(subgraph, pos, with_labels=True, node_size=3000, node_color="#d9f0f7",
+            font_size=9, font_weight="bold", edge_color="#777")
     st.pyplot(plt.gcf())
