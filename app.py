@@ -1,82 +1,72 @@
 import streamlit as st
 import pandas as pd
-import matplotlib.pyplot as plt
 import networkx as nx
-import io
+import matplotlib.pyplot as plt
 
 st.set_page_config(page_title="Edwards Family Tree", layout="wide")
-st.title("Edwards Family Tree Viewer")
+
+st.title("🌳 Edwards Family Tree Explorer")
+st.markdown("Upload the Excel file to generate the interactive family tree.")
 
 uploaded_file = st.file_uploader("Upload your Excel file", type=["xlsx"])
 
 if uploaded_file:
+    # Read all sheets into a dictionary of DataFrames
     df_dict = pd.read_excel(uploaded_file, sheet_name=None)
 
     root_name = "Henrietta & Edmond"
     G = nx.DiGraph()
     G.add_node(root_name)
 
-    all_people = set()
-    family_map = {}
-
-    # Extract the first sheet to determine the original children
-    first_sheet = next(iter(df_dict.values()))
     original_children = []
-    for i, row in first_sheet.iterrows():
-        child = str(row[0]).strip()
-        if pd.notna(child) and child.lower() not in ["note", "", "none"]:
-            original_children.append(child)
-            G.add_node(child)
-            G.add_edge(root_name, child)
-            family_map[child] = child  # Key for sidebar filtering
+    for sheet_name in df_dict:
+        child = sheet_name.strip()
+        original_children.append(child)
+        G.add_edge(root_name, child)
 
-    # Process all sheets
-    for sheet_name, df in df_dict.items():
-        branch_name = sheet_name.strip()
-        previous_person = None
+        df = df_dict[sheet_name]
+        if df.empty:
+            continue
 
-        for i, row in df.iterrows():
-            person = str(row[0]).strip()
-            if pd.isna(person) or person.lower() in ["note", "", "none"]:
-                continue
+        for _, row in df.iterrows():
+            parent = child
+            for col in df.columns:
+                val = str(row[col]).strip()
+                if val and val.lower() not in ["nan", "none"]:
+                    G.add_edge(parent, val)
+                    parent = val  # Next child in the chain
 
-            all_people.add(person)
-            if person not in G:
-                G.add_node(person)
-            if previous_person:
-                G.add_edge(previous_person, person)
-            elif branch_name in original_children:
-                G.add_edge(branch_name, person)
-            family_map[person] = branch_name
-            previous_person = person
+    # Sidebar filter
+    st.sidebar.title("📁 Filter Branch")
+    selected_branch = st.sidebar.selectbox("Select a branch to view", ["All"] + original_children)
 
-    st.sidebar.title("Filter")
-    selected_branch = st.sidebar.selectbox("Select a branch to view", options=["All"] + original_children)
+    # Filter the graph
+    def collect_descendants(graph, start_node):
+        nodes = set()
+        edges = []
 
-    # Filter nodes based on the selected branch
-    nodes_to_display = set()
-    edges_to_display = []
+        def recurse(node):
+            if node in nodes:
+                return
+            nodes.add(node)
+            for child in graph.successors(node):
+                edges.append((node, child))
+                recurse(child)
+
+        recurse(start_node)
+        return nodes, edges
 
     if selected_branch == "All":
-        nodes_to_display = set(G.nodes)
-        edges_to_display = list(G.edges)
+        subgraph = G
     else:
-        def dfs_add(node):
-            if node in nodes_to_display:
-                return
-            nodes_to_display.add(node)
-            for child in G.successors(node):
-                edges_to_display.append((node, child))
-                dfs_add(child)
+        nodes, edges = collect_descendants(G, selected_branch)
+        nodes.add(root_name)
+        edges.append((root_name, selected_branch))
+        subgraph = G.edge_subgraph(edges).copy()
+        subgraph.add_nodes_from(nodes)
 
-        nodes_to_display.add(root_name)
-        nodes_to_display.add(selected_branch)
-        edges_to_display.append((root_name, selected_branch))
-        dfs_add(selected_branch)
-
-    subgraph = G.subgraph(nodes_to_display)
-
-    def hierarchy_pos(G, root=None, width=1., vert_gap=0.2, vert_loc=0, xcenter=0.5, pos=None, parent=None):
+    # Hierarchical layout helper
+    def hierarchy_pos(G, root, width=1.0, vert_gap=0.2, vert_loc=0, xcenter=0.5, pos=None, parent=None):
         if pos is None:
             pos = {root: (xcenter, vert_loc)}
         else:
@@ -84,32 +74,30 @@ if uploaded_file:
         children = list(G.successors(root))
         if not children:
             return pos
-
-        dx = width / max(len(children), 1)
+        dx = width / len(children)
         nextx = xcenter - width / 2 - dx / 2
         for child in children:
             nextx += dx
-            if child not in pos:
-                pos = hierarchy_pos(G, root=child, width=dx, vert_gap=vert_gap,
-                                    vert_loc=vert_loc - vert_gap, xcenter=nextx, pos=pos, parent=root)
+            pos = hierarchy_pos(G, child, width=dx, vert_gap=vert_gap,
+                                vert_loc=vert_loc - vert_gap, xcenter=nextx, pos=pos, parent=root)
         return pos
 
+    # Draw tree
     try:
-        roots = [n for n in subgraph.nodes if subgraph.in_degree(n) == 0]
-        all_pos = {}
-
-        for i, r in enumerate(roots):
-            sub_pos = hierarchy_pos(subgraph, root=r, xcenter=(i + 1) / (len(roots) + 1))
-            all_pos.update(sub_pos)
-
-        missing_nodes = set(subgraph.nodes) - set(all_pos.keys())
-        for i, orphan in enumerate(missing_nodes):
-            all_pos[orphan] = (0.1 + i * 0.05, -1)
-
+        pos = hierarchy_pos(subgraph, root=root_name)
         plt.figure(figsize=(22, 14))
-        nx.draw(subgraph, all_pos, with_labels=True, node_size=3000, node_color="#d9f0f7",
-                font_size=9, font_weight="bold", edge_color="#777")
-        st.pyplot(plt.gcf())
-
+        nx.draw(
+            subgraph,
+            pos,
+            with_labels=True,
+            arrows=False,
+            node_size=3000,
+            node_color="#f0f8ff",
+            font_size=8,
+            font_weight="bold",
+            edge_color="gray"
+        )
+        st.pyplot(plt)
+        st.success("✅ Tree successfully displayed.")
     except Exception as e:
-        st.error(f"Error rendering tree layout: {e}")
+        st.error(f"❌ Error rendering tree layout: {e}")
