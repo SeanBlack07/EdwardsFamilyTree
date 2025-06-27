@@ -62,6 +62,8 @@ if uploaded_file:
         edges_to_display = list(G.edges)
     else:
         def dfs_add(node):
+            if node in nodes_to_display:
+                return
             nodes_to_display.add(node)
             for child in G.successors(node):
                 edges_to_display.append((node, child))
@@ -83,12 +85,13 @@ if uploaded_file:
         if not children:
             return pos
 
-        dx = width / len(children)
+        dx = width / max(len(children), 1)
         nextx = xcenter - width / 2 - dx / 2
         for child in children:
             nextx += dx
-            pos = hierarchy_pos(G, root=child, width=dx, vert_gap=vert_gap,
-                                vert_loc=vert_loc - vert_gap, xcenter=nextx, pos=pos, parent=root)
+            if child not in pos:
+                pos = hierarchy_pos(G, root=child, width=dx, vert_gap=vert_gap,
+                                    vert_loc=vert_loc - vert_gap, xcenter=nextx, pos=pos, parent=root)
         return pos
 
     pos = hierarchy_pos(subgraph, root=root_name)
