@@ -2,51 +2,60 @@ import streamlit as st
 import pandas as pd
 import networkx as nx
 import matplotlib.pyplot as plt
+from networkx.drawing.nx_agraph import graphviz_layout
+import pygraphviz as pgv
+import io
 
-st.set_page_config(page_title="Edwards Family Tree", layout="wide")
+# Page config
+st.set_page_config(page_title="Edwards Family Tree Explorer", layout="wide")
+st.title("Edwards Family Tree")
 
-st.title("📜 Edwards Family Tree Explorer")
-st.markdown("Upload the Excel file to generate the interactive family tree.")
-
-uploaded_file = st.file_uploader("Upload your Excel file", type=["xlsx"])
+# File uploader
+uploaded_file = st.file_uploader("Upload your Excel family tree (XLSX)", type=["xlsx"])
 
 if uploaded_file:
-    # Read all sheets into a dictionary of DataFrames
     df_dict = pd.read_excel(uploaded_file, sheet_name=None)
-
-    root_name = "Henrietta & Edmond"
     G = nx.DiGraph()
-    G.add_node(root_name)
 
+    # Build graph from each sheet (assuming each sheet is a family branch)
     for sheet_name, df in df_dict.items():
-        if df.empty:
-            continue
-        parent = sheet_name.strip()
-        G.add_edge(root_name, parent)
-
-        # Loop through the names in the sheet and add as descendants
+        df.fillna("", inplace=True)
         for _, row in df.iterrows():
-            for col in df.columns:
-                val = str(row[col]).strip()
-                if val and val.lower() not in ["nan", "none"]:
-                    G.add_edge(parent, val)
+            parent = row[0].strip()
+            for val in row[1:]:
+                if val and isinstance(val, str):
+                    G.add_edge(parent, val.strip())
 
-    # Generate a layout (spring layout doesn't require pygraphviz)
-    pos = nx.spring_layout(G, seed=42)
+    # Sidebar filter
+    all_nodes = sorted(G.nodes())
+    root_filter = st.sidebar.selectbox("Select a root to filter by", options=["All"] + all_nodes)
 
-    plt.figure(figsize=(20, 12))
+    if root_filter != "All":
+        descendants = nx.descendants(G, root_filter)
+        sub_nodes = [root_filter] + list(descendants)
+        subG = G.subgraph(sub_nodes).copy()
+    else:
+        subG = G
+
+    # Draw the tree
+    try:
+        pos = graphviz_layout(subG, prog='dot')
+    except Exception:
+        pos = nx.spring_layout(subG, seed=42)
+
+    fig, ax = plt.subplots(figsize=(24, 18))
     nx.draw(
-        G,
+        subG,
         pos,
         with_labels=True,
-        arrows=False,
+        node_color="#f0f9ff",
         node_size=3000,
-        node_color="#f9f9f9",
-        font_size=8,
+        font_size=10,
         font_weight="bold",
-        edge_color="gray"
+        arrows=False,
+        ax=ax
     )
-    st.pyplot(plt)
-
-    st.markdown("---")
-    st.success("✅ Tree successfully generated.")
+    st.pyplot(fig)
+    st.success(f"Tree rendered for {root_filter if root_filter != 'All' else 'all branches'}.")
+else:
+    st.info("Please upload a valid Excel file to view the family tree.")
